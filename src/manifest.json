@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "网页转 Word (高保真版)",
+  "version": "1.0",
+  "description": "将网页完整内容（包含 MathJax 公式和样式）导出为 Word 文档",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "notifications"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "导出为 Word",
+    "default_icon": {
+      "16": "icons/icon_gray.svg",
+      "48": "icons/icon_gray.svg",
+      "128": "icons/icon_gray.svg"
+    }
+  },
+  "icons": {
+    "16": "icons/icon_color.svg",
+    "48": "icons/icon_color.svg",
+    "128": "icons/icon_color.svg"
+  }
+}

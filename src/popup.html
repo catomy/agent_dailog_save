@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 300px; padding: 15px; font-family: 'Segoe UI', sans-serif; }
+    h3 { margin-top: 0; color: #333; }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      background-color: #2b579a; /* Word Blue */
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .btn:hover { background-color: #1e3e70; }
+    .btn:disabled { background-color: #ccc; cursor: not-allowed; }
+    #status {
+      font-size: 12px;
+      color: #666;
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .log-item { margin-bottom: 4px; }
+    .options { margin-bottom: 15px; font-size: 13px; }
+    label { display: flex; align-items: center; cursor: pointer; }
+    input[type="checkbox"] { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h3>网页转 Word</h3>
+  <div class="options">
+    <label>
+      <input type="checkbox" id="autoScroll" checked>
+      自动滚动以加载内容
+    </label>
+  </div>
+  <button id="exportBtn" class="btn">开始转换并导出</button>
+  <div id="status">准备就绪</div>
+  <script src="popup.js"></script>
+</body>
+</html>
