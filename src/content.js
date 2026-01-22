@@ -343,39 +343,97 @@ async function processImages() {
   
   const convertImg = async (img) => {
     try {
-      if (!img.src) return;
-      if (img.src.startsWith('data:')) return;
+      // 1. 获取真实的图片 URL (处理懒加载)
+      // 优先检查 data-src, data-original, data-url 等常见懒加载属性
+      let src = img.src;
+      const lazyAttrs = ['data-src', 'data-original', 'data-original-src', 'data-url', 'data-lazy-src'];
+      
+      // 如果 src 不存在，或者 src 是 base64 占位符（通常很短），或者是 1x1 像素点
+      // 简单的判断：如果 src 包含 "data:image" 且长度小于 2000，可能只是占位符
+      const isPlaceholder = !src || (src.startsWith('data:') && src.length < 2000) || src.includes('spacer.gif');
+      
+      if (isPlaceholder) {
+        for (const attr of lazyAttrs) {
+          const val = img.getAttribute(attr);
+          if (val) {
+            src = val;
+            // 如果是相对路径，转绝对路径
+            if (!src.startsWith('http') && !src.startsWith('data:')) {
+               const a = document.createElement('a');
+               a.href = src;
+               src = a.href;
+            }
+            break;
+          }
+        }
+      }
+
+      if (!src) return;
+      if (src.startsWith('data:')) {
+          // 如果已经是高清的 base64 (长度够长)，直接保存
+          if (src.length > 2000) {
+             const id = img.getAttribute('data-docx-id');
+             results.push({ id, dataUrl: src });
+          }
+          return;
+      }
 
       const id = img.getAttribute('data-docx-id');
       
-      // 方案 A: 尝试使用 Canvas 转换 (速度最快)
+      // 方案 A: 尝试使用 Canvas 转换 (速度最快，且能处理一部分格式问题)
       // 需要创建一个新的 Image 对象以避免污染页面上的元素或处理跨域属性
       const newImg = new Image();
       newImg.crossOrigin = "Anonymous";
       
-      await new Promise((resolve, reject) => {
-          newImg.onload = resolve;
-          newImg.onerror = reject;
-          newImg.src = img.src;
-          // 超时保护
-          setTimeout(() => reject(new Error('Image load timeout')), 3000);
-      });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = newImg.naturalWidth;
-      canvas.height = newImg.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(newImg, 0, 0);
-      
       try {
+          await new Promise((resolve, reject) => {
+              newImg.onload = resolve;
+              newImg.onerror = reject;
+              newImg.src = src;
+              // 超时保护 8s
+              setTimeout(() => reject(new Error('Image load timeout')), 8000);
+          });
+
+          const canvas = document.createElement('canvas');
+          canvas.width = newImg.naturalWidth;
+          canvas.height = newImg.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(newImg, 0, 0);
+          
           const dataUrl = canvas.toDataURL('image/png');
           results.push({ id, dataUrl });
-      } catch (e) {
-          // Canvas 被污染 (Tainted)，通常是因为跨域图片且服务器不支持 CORS
+      } catch (canvasErr) {
+          // Canvas 被污染 (Tainted) 或加载失败
           // 方案 B: 尝试使用 Fetch (如果 CSP 允许)
+          // 增加 no-referrer 策略以绕过防盗链
           try {
-              const response = await fetch(img.src);
-              const blob = await response.blob();
+              const fetchImage = async (url, options = {}) => {
+                  const controller = new AbortController();
+                  const id = setTimeout(() => controller.abort(), 8000);
+                  try {
+                      const res = await fetch(url, { 
+                          ...options, 
+                          signal: controller.signal,
+                          credentials: 'omit' // 不发送 Cookie
+                      });
+                      clearTimeout(id);
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                      return await res.blob();
+                  } catch (e) {
+                      clearTimeout(id);
+                      throw e;
+                  }
+              };
+
+              // 第一次尝试：无 Referrer
+              let blob;
+              try {
+                  blob = await fetchImage(src, { referrerPolicy: 'no-referrer' });
+              } catch (e) {
+                  // 第二次尝试：默认策略 (有些图片可能需要 Referrer)
+                  blob = await fetchImage(src);
+              }
+
               const reader = new FileReader();
               const base64 = await new Promise(r => {
                   reader.onloadend = () => r(reader.result);
@@ -384,6 +442,8 @@ async function processImages() {
               results.push({ id, dataUrl: base64 });
           } catch (fetchErr) {
               // console.warn('Fetch also failed', fetchErr);
+              // 如果都失败了，我们保留原 img 标签的 src (如果是 http)，让 Word 自己去尝试加载（虽然 Word 也可能失败）
+              // 但为了 cleanUnprocessedImages 不误删，我们可以不做处理，或者标记一下
           }
       }
     } catch (e) {
@@ -392,11 +452,11 @@ async function processImages() {
   };
 
   // 批量处理
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5; // 减小并发，避免网络拥塞
   for (let i = 0; i < imgs.length; i += BATCH_SIZE) {
     const chunk = imgs.slice(i, i + BATCH_SIZE);
     await Promise.all(chunk.map(convertImg));
-    if (i % 20 === 0) log(`处理图片: ${i}/${imgs.length}`);
+    if (i % 10 === 0) log(`处理图片: ${i}/${imgs.length}`);
   }
   
   return results;
