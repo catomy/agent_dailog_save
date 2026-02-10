@@ -30,12 +30,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       message: request.message || '未知错误',
       priority: 2
     });
-  } else if (request.action === 'export_start') {
-      // 当导出开始时，点亮图标（如果是灰色默认）
-      // 或者我们可以反过来，默认灰色，只有在特定页面或点击后变色
-      // 这里根据用户需求：加载后变亮。
-      // 实际上，用户说“加载以后需要变成亮色”，通常指页面加载完成（content script注入成功）
-      // 我们可以在 content script 初始化时发送一个 'ready' 消息
+  } else if (request.action === 'engine_ready' || request.action === 'export_start') {
+      // engine_ready: content script 注入并完成初始化
+      // export_start: 导出任务开始
       if (sender.tab) {
           chrome.action.setIcon({ 
               tabId: sender.tab.id, 

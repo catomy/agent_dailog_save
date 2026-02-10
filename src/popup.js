@@ -39,10 +39,16 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
       // await 确保消息成功发送到 content script
       // 由于 content script 中没有 return true，sendMessage 会在 handler 执行完同步代码后立即返回
       // 不会等待 runExport 异步任务完成，符合我们"后台运行"的需求
-      await chrome.tabs.sendMessage(tab.id, {
+      const startResp = await chrome.tabs.sendMessage(tab.id, {
         action: 'start_export',
         config: { autoScroll }
       });
+
+      if (startResp && startResp.status === 'busy') {
+        statusEl.innerHTML += '<div class="log-item" style="color:orange">⚠️ 当前页面已有导出任务正在进行，请稍后再试。</div>';
+        btn.disabled = false;
+        return;
+      }
       
       // 立即反馈给用户
       statusEl.innerHTML += '<div class="log-item" style="color:green">✅ 任务已启动！</div>';
@@ -55,10 +61,15 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
     } catch (retryErr) {
       // 如果注入后立刻发送失败，再试一次
       await new Promise(r => setTimeout(r, 500));
-      await chrome.tabs.sendMessage(tab.id, {
+      const retryResp = await chrome.tabs.sendMessage(tab.id, {
         action: 'start_export',
         config: { autoScroll }
       });
+      if (retryResp && retryResp.status === 'busy') {
+        statusEl.innerHTML += '<div class="log-item" style="color:orange">⚠️ 当前页面已有导出任务正在进行，请稍后再试。</div>';
+        btn.disabled = false;
+        return;
+      }
       statusEl.innerHTML += '<div class="log-item" style="color:green">✅ 任务已启动！(重试成功)</div>';
     }
 

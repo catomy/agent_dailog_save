@@ -5,14 +5,26 @@ const katex = require('katex');
 
 const CTX_ID = chrome.runtime.id;
 const GLOBAL_FLAG = `hasRunContentScript_${CTX_ID}`;
+const STATE_KEY = '__wordExportState';
+
+if (!window[STATE_KEY]) {
+  window[STATE_KEY] = {
+    isExporting: false,
+  };
+}
+
+const exportState = window[STATE_KEY];
 
 // 始终注册监听器，因为我们将在 popup 中控制注入时机
 // 为了避免旧代码残留（虽然很难完全避免），我们只注册一次核心逻辑
 // 但由于无法移除旧监听器，我们通过简单的全局变量来防止重复执行业务逻辑
-setupListener();
+if (!window[GLOBAL_FLAG]) {
+  setupListener();
+  window[GLOBAL_FLAG] = true;
 
-// 通知 background 脚本已就绪，请求点亮图标
-chrome.runtime.sendMessage({ action: 'export_start' }); // 借用 export_start 状态来点亮，或者新建 action 'ready'
+  // 仅在首次初始化时通知 background，避免重复注入导致的无意义状态抖动
+  chrome.runtime.sendMessage({ action: 'engine_ready' });
+}
 // 为了语义准确，我们在 background 中处理 'export_start' 或 'ready' 都可以
 // 这里简单起见，既然用户说“加载以后”，我们理解为页面加载完成或插件注入完成。
 // 由于我们是按需注入，所以只有点击后注入才会变亮。
@@ -39,11 +51,14 @@ function setupListener() {
     // 2. 导出逻辑
     if (request.action === 'start_export') {
       // 检查是否已经在运行
-      if (window._isExporting) {
+      if (exportState.isExporting) {
         log('正在进行中，请稍候...');
+        sendResponse({ status: 'busy' });
         return;
       }
-      window._isExporting = true;
+      exportState.isExporting = true;
+
+      chrome.runtime.sendMessage({ action: 'export_start' });
       
       runExport(request.config)
         .catch(err => {
@@ -51,8 +66,10 @@ function setupListener() {
           chrome.runtime.sendMessage({ action: 'export_error', message: err.toString() });
         })
         .finally(() => {
-          window._isExporting = false;
+          exportState.isExporting = false;
         });
+
+      sendResponse({ status: 'started' });
       
       // 异步响应需要返回 true，但这里我们主要通过 sendMessage 回传状态，所以不需要
     }
