@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "网页转 Word (高保真版)",
-  "version": "1.0",
+  "version": "1.0.1",
   "description": "将网页完整内容（包含 MathJax 公式和样式）导出为 Word 文档",
   "permissions": [
     "activeTab",

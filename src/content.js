@@ -87,6 +87,8 @@ async function runExport(config) {
   // 4. 处理常规图片和图标 (转 Base64 以支持离线/Word)
   log('正在处理网页图片和图标...');
   const docImages = await processImages();
+  log('正在处理背景图片...');
+  const bgImages = await processBackgroundImages();
 
   // 5. 克隆页面
   log('正在创建文档副本...');
@@ -102,6 +104,7 @@ async function runExport(config) {
 
   // 8. 应用常规图片替换 (替换为 Base64)
   applyDocImages(clonedBody, docImages);
+  applyBackgroundImages(clonedBody, bgImages);
 
   // 9. 清理未成功转换的图片 (防止 html-docx-js 报错)
   // html-docx-js 如果遇到非 data: 的 src 且无法下载，会抛出 Unable to download 错误
@@ -340,13 +343,45 @@ function applyMathImages(clonedRoot, mathImages) {
 async function processImages() {
   const imgs = Array.from(document.querySelectorAll('img'));
   const results = [];
+
+  const pickBestFromSrcset = (srcset) => {
+    if (!srcset) return '';
+    const candidates = srcset
+      .split(',')
+      .map(item => item.trim())
+      .map(item => {
+        const parts = item.split(/\s+/);
+        const url = parts[0];
+        const descriptor = parts[1] || '';
+        const density = descriptor.endsWith('x') ? parseFloat(descriptor) : NaN;
+        const width = descriptor.endsWith('w') ? parseInt(descriptor, 10) : NaN;
+        return { url, density, width };
+      })
+      .filter(c => c.url);
+
+    if (candidates.length === 0) return '';
+
+    const densityCandidates = candidates.filter(c => !Number.isNaN(c.density));
+    if (densityCandidates.length > 0) {
+      densityCandidates.sort((a, b) => b.density - a.density);
+      return densityCandidates[0].url;
+    }
+
+    const widthCandidates = candidates.filter(c => !Number.isNaN(c.width));
+    if (widthCandidates.length > 0) {
+      widthCandidates.sort((a, b) => b.width - a.width);
+      return widthCandidates[0].url;
+    }
+
+    return candidates[0].url;
+  };
   
   const convertImg = async (img) => {
     try {
       // 1. 获取真实的图片 URL (处理懒加载)
       // 优先检查 data-src, data-original, data-url 等常见懒加载属性
-      let src = img.src;
-      const lazyAttrs = ['data-src', 'data-original', 'data-original-src', 'data-url', 'data-lazy-src'];
+      let src = img.currentSrc || img.src;
+      const lazyAttrs = ['data-src', 'data-original', 'data-original-src', 'data-url', 'data-lazy-src', 'data-srcset', 'srcset'];
       
       // 如果 src 不存在，或者 src 是 base64 占位符（通常很短），或者是 1x1 像素点
       // 简单的判断：如果 src 包含 "data:image" 且长度小于 2000，可能只是占位符
@@ -354,8 +389,15 @@ async function processImages() {
       
       if (isPlaceholder) {
         for (const attr of lazyAttrs) {
-          const val = img.getAttribute(attr);
+          let val = img.getAttribute(attr);
           if (val) {
+            // data-srcset / srcset 可能是 "url1 1x, url2 2x"，提取第一个 URL
+            if (attr === 'data-srcset' || attr === 'srcset') {
+              val = pickBestFromSrcset(val);
+            }
+            if (val.startsWith('//')) {
+              val = `${window.location.protocol}${val}`;
+            }
             src = val;
             // 如果是相对路径，转绝对路径
             if (!src.startsWith('http') && !src.startsWith('data:')) {
@@ -462,6 +504,75 @@ async function processImages() {
   return results;
 }
 
+async function processBackgroundImages() {
+  const elements = Array.from(document.querySelectorAll('*'));
+  const results = [];
+
+  const fetchImage = async (url, options = {}) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        credentials: 'omit'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.blob();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const convertUrlToDataUrl = async (url) => {
+    if (!url || url.startsWith('data:')) return url;
+    if (url.startsWith('//')) {
+      url = `${window.location.protocol}${url}`;
+    }
+
+    const absoluteUrl = new URL(url, document.baseURI).href;
+    let blob;
+    try {
+      blob = await fetchImage(absoluteUrl, { referrerPolicy: 'no-referrer' });
+    } catch (_) {
+      blob = await fetchImage(absoluteUrl);
+    }
+
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  for (const el of elements) {
+    const id = el.getAttribute('data-docx-id');
+    if (!id) continue;
+    const bg = window.getComputedStyle(el).getPropertyValue('background-image');
+    if (!bg || bg === 'none' || !bg.includes('url(')) continue;
+
+    const urlMatches = [...bg.matchAll(/url\((['"]?)(.*?)\1\)/g)];
+    if (urlMatches.length === 0) continue;
+
+    let nextBg = bg;
+    for (const match of urlMatches) {
+      const rawUrl = match[2];
+      try {
+        const dataUrl = await convertUrlToDataUrl(rawUrl);
+        if (dataUrl && dataUrl.startsWith('data:')) {
+          nextBg = nextBg.replace(match[0], `url("${dataUrl}")`);
+        }
+      } catch (_) {}
+    }
+
+    if (nextBg !== bg) {
+      results.push({ id, backgroundImage: nextBg });
+    }
+  }
+
+  return results;
+}
+
 function applyDocImages(clonedRoot, docImages) {
   docImages.forEach(item => {
     const target = clonedRoot.querySelector(`img[data-docx-id="${item.id}"]`);
@@ -470,6 +581,16 @@ function applyDocImages(clonedRoot, docImages) {
       // 移除 srcset 避免干扰
       target.removeAttribute('srcset');
       target.removeAttribute('loading'); // 移除懒加载属性
+    }
+  });
+}
+
+function applyBackgroundImages(clonedRoot, bgImages) {
+  bgImages.forEach(item => {
+    const target = clonedRoot.querySelector(`[data-docx-id="${item.id}"]`);
+    if (target) {
+      const style = target.getAttribute('style') || '';
+      target.setAttribute('style', `${style};background-image:${item.backgroundImage};`);
     }
   });
 }
