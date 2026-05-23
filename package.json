@@ -11,6 +11,9 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "babel-loader": "^10.1.1",
     "buffer": "^6.0.3",
     "copy-webpack-plugin": "^13.0.1",
     "crypto-browserify": "^3.12.1",

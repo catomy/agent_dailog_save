@@ -10,6 +10,21 @@ module.exports = {
     popup: './src/popup.js',
     background: './src/background.js'
   },
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-env'],
+            sourceType: 'module'
+          }
+        }
+      }
+    ]
+  },
   output: {
     filename: '[name].js',
     path: path.resolve(__dirname, 'dist'),
